@@ -1,0 +1,18 @@
+2026-01-02;1;10000 Bank;Indskudt startkapital;50000
+2026-01-02;1;20000 Egenkapital;Indskudt startkapital;-50000
+2026-01-05;2;12000 Inventar;Køb af computer og skrivebord;12000
+2026-01-05;2;10000 Bank;Køb af computer og skrivebord;-12000
+2026-01-10;3;1000 Salg;Kontantsalg;-7500
+2026-01-10;3;10000 Bank;Kontantsalg;7500
+2026-02-01;4;3000 Husleje;Husleje februar;3500
+2026-02-01;4;10000 Bank;Husleje februar;-3500
+2026-02-06;5;2000 Kontorartikler;Papir og printerblæk;800
+2026-02-06;5;21000 Kreditorer;Papir og printerblæk;-800
+2026-02-15;6;4000 Bankgebyrer;Månedligt bankgebyr;75
+2026-02-15;6;10000 Bank;Månedligt bankgebyr;-75
+2026-03-03;7;11000 Debitorer;Salg på kredit;4200
+2026-03-03;7;1000 Salg;Salg på kredit;-4200
+2026-03-20;8;10000 Bank;Kunde betaler faktura;4200
+2026-03-20;8;11000 Debitorer;Kunde betaler faktura;-4200
+2026-03-31;9;10000 Bank;Renteindtægt fra banken;125
+2026-03-31;9;5000 Renteindtægter;Renteindtægt fra banken;-125

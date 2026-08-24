@@ -18,11 +18,6 @@ type ValidationIssue = { file: string; line?: number; message: string };
 type ImportedFile = { name: string; rows: number; issues: number };
 type View = 'overview' | 'transactions' | 'taccounts' | 'trialbalance' | 'accountcards' | 'accounts' | 'import';
 
-const sampleEntries: Entry[] = [
-  { id: 'sample-1', file: 'test1.csv', line: 1, date: '2026-01-01', voucher: '1', accountNumber: 1000, account: '1000 RENTER', description: 'Modtagne renter', amount: -1000 },
-  { id: 'sample-2', file: 'test1.csv', line: 2, date: '2026-01-01', voucher: '1', accountNumber: 10000, account: '10000 BANK', description: 'Modtagne renter', amount: 1000 },
-];
-
 const money = new Intl.NumberFormat('da-DK', {
   style: 'currency',
   currency: 'DKK',
@@ -114,8 +109,8 @@ function dateLabel(value: string) {
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<View>('overview');
-  const [entries, setEntries] = useState<Entry[]>(sampleEntries);
-  const [files, setFiles] = useState<ImportedFile[]>([{ name: 'test1.csv', rows: 2, issues: 0 }]);
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [files, setFiles] = useState<ImportedFile[]>([]);
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [showFormat, setShowFormat] = useState(false);
@@ -219,6 +214,25 @@ export default function Home() {
     setView(nextIssues.length ? 'import' : 'overview');
   }
 
+  async function loadTestFile() {
+    const name = 'test-regnskab.csv';
+    try {
+      const response = await fetch(name);
+      if (!response.ok) throw new Error('Testfilen kunne ikke hentes.');
+      const parsed = parseCsv(name, await response.text());
+      setEntries(parsed.entries);
+      setIssues(parsed.issues);
+      setFiles([{ name, rows: parsed.entries.length, issues: parsed.issues.length }]);
+      setQuery('');
+      setView(parsed.issues.length ? 'import' : 'overview');
+    } catch {
+      setEntries([]);
+      setFiles([{ name, rows: 0, issues: 1 }]);
+      setIssues([{ file: name, message: 'Testfilen kunne ikke indlæses.' }]);
+      setView('import');
+    }
+  }
+
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragging(false);
@@ -284,7 +298,7 @@ export default function Home() {
                 {entries.length ? (
                   <TransactionTable entries={entries.slice(0, 8)} subtitle={`${files.length} ${files.length === 1 ? 'fil' : 'filer'} indlæst`} valid={!allIssues.length} onShowAll={() => setView('transactions')} />
                 ) : (
-                  <EmptyImport isDragging={isDragging} setIsDragging={setIsDragging} handleDrop={handleDrop} onPick={() => inputRef.current?.click()} />
+                  <EmptyImport isDragging={isDragging} setIsDragging={setIsDragging} handleDrop={handleDrop} onPick={() => inputRef.current?.click()} onLoadTest={loadTestFile} />
                 )}
               </>
             )}
@@ -436,7 +450,7 @@ export default function Home() {
             {view === 'import' && (
               <>
                 <PageHeading eyebrow="CSV-kontrol" title="Importér regnskabsdata" description="Slip filer her, eller vælg flere CSV-filer på én gang." />
-                <EmptyImport isDragging={isDragging} setIsDragging={setIsDragging} handleDrop={handleDrop} onPick={() => inputRef.current?.click()} compact />
+                <EmptyImport isDragging={isDragging} setIsDragging={setIsDragging} handleDrop={handleDrop} onPick={() => inputRef.current?.click()} onLoadTest={loadTestFile} compact />
 
                 {!!files.length && <article className="mt-5 rounded-2xl border border-[#dfe5e2] bg-white p-5"><div className="mb-4 flex items-center justify-between"><h2 className="font-semibold">Indlæste filer</h2><button onClick={reset} className="text-xs font-semibold text-[#a34848] hover:underline">Ryd regnskab</button></div><div className="space-y-2">{files.map((file) => <div key={file.name} className="flex items-center gap-3 rounded-xl bg-[#f7f9f8] px-4 py-3"><span className="grid h-8 w-8 place-items-center rounded-lg bg-white text-xs font-bold text-[#568170]">CSV</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{file.name}</p><p className="text-xs text-[#74807b]">{file.rows} gyldige linjer</p></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${file.issues ? 'bg-[#fbe9e7] text-[#a34848]' : 'bg-[#e8f5ef] text-[#196749]'}`}>{file.issues ? `${file.issues} fejl` : 'Gyldig'}</span></div>)}</div></article>}
 
@@ -509,8 +523,21 @@ function TAccount({ account }: { account: { number: number; name: string; debit:
   );
 }
 
-function EmptyImport({ isDragging, setIsDragging, handleDrop, onPick, compact = false }: { isDragging: boolean; setIsDragging: (value: boolean) => void; handleDrop: (event: DragEvent<HTMLDivElement>) => void; onPick: () => void; compact?: boolean }) {
-  return <div onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={handleDrop} className={`grid place-items-center rounded-2xl border-2 border-dashed px-6 text-center transition ${compact ? 'min-h-48' : 'min-h-72'} ${isDragging ? 'border-[#3c8269] bg-[#eaf3ef]' : 'border-[#cfd8d4] bg-white'}`}><div><span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#eaf3ef] text-xl font-semibold text-[#165c46]">+</span><h2 className="mt-4 font-semibold">Slip dine CSV-filer her</h2><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[#74807b]">Du kan indlæse én eller flere semikolon-separerede filer. De bliver kontrolleret med det samme.</p><button onClick={onPick} className="mt-4 rounded-xl bg-[#165c46] px-5 py-2.5 text-sm font-semibold text-white">Vælg filer</button></div></div>;
+function EmptyImport({ isDragging, setIsDragging, handleDrop, onPick, onLoadTest, compact = false }: { isDragging: boolean; setIsDragging: (value: boolean) => void; handleDrop: (event: DragEvent<HTMLDivElement>) => void; onPick: () => void; onLoadTest: () => void; compact?: boolean }) {
+  return (
+    <div onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={handleDrop} className={`grid place-items-center rounded-2xl border-2 border-dashed px-6 text-center transition ${compact ? 'min-h-56' : 'min-h-80'} ${isDragging ? 'border-[#3c8269] bg-[#eaf3ef]' : 'border-[#cfd8d4] bg-white'}`}>
+      <div>
+        <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#eaf3ef] text-xl font-semibold text-[#165c46]">+</span>
+        <h2 className="mt-4 font-semibold">Slip dine CSV-filer her</h2>
+        <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[#74807b]">Indlæs dine egne filer, eller prøv testregnskabet med 18 simple posteringer fordelt på drift, aktiver og passiver.</p>
+        <div className="mt-5 flex flex-wrap justify-center gap-2.5">
+          <button onClick={onPick} className="rounded-xl bg-[#165c46] px-5 py-2.5 text-sm font-semibold text-white">Vælg filer</button>
+          <button onClick={onLoadTest} className="rounded-xl border border-[#8cb4a5] bg-[#edf6f2] px-5 py-2.5 text-sm font-semibold text-[#165c46]">Indlæs testfil</button>
+          <a href="test-regnskab.csv" download className="rounded-xl border border-[#d8dfdc] bg-white px-5 py-2.5 text-sm font-semibold text-[#5d6863] hover:bg-[#f7f9f8]">Download testfil</a>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function FormatDialog({ onClose }: { onClose: () => void }) {
