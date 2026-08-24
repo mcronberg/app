@@ -134,12 +134,12 @@ export default function Home() {
   const period = years.length ? years.join('–') : '—';
 
   const accounts = useMemo(() => {
-    const balances = new Map<string, { number: number; name: string; count: number; balance: number }>();
+    const balances = new Map<number, { number: number; name: string; count: number; balance: number }>();
     entries.forEach((entry) => {
-      const current = balances.get(entry.account) ?? { number: entry.accountNumber, name: entry.account.replace(/^\d+\s+/, ''), count: 0, balance: 0 };
+      const current = balances.get(entry.accountNumber) ?? { number: entry.accountNumber, name: entry.account.replace(/^\d+\s+/, ''), count: 0, balance: 0 };
       current.count += 1;
       current.balance += entry.amount;
-      balances.set(entry.account, current);
+      balances.set(entry.accountNumber, current);
     });
     return [...balances.values()].sort((a, b) => a.number - b.number);
   }, [entries]);
