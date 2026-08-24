@@ -16,7 +16,7 @@ type Entry = {
 
 type ValidationIssue = { file: string; line?: number; message: string };
 type ImportedFile = { name: string; rows: number; issues: number };
-type View = 'overview' | 'transactions' | 'taccounts' | 'accounts' | 'import';
+type View = 'overview' | 'transactions' | 'taccounts' | 'trialbalance' | 'accounts' | 'import';
 
 const sampleEntries: Entry[] = [
   { id: 'sample-1', file: 'test1.csv', line: 1, date: '2026-01-01', voucher: '1', accountNumber: 1000, account: '1000 RENTER', description: 'Modtagne renter', amount: -1000 },
@@ -33,6 +33,7 @@ const nav: { id: View; label: string; icon: string }[] = [
   { id: 'overview', label: 'Overblik', icon: '●' },
   { id: 'transactions', label: 'Posteringer', icon: '↕' },
   { id: 'taccounts', label: 'T-konti', icon: 'T' },
+  { id: 'trialbalance', label: 'Saldobalance', icon: 'Σ' },
   { id: 'accounts', label: 'Kontoplan', icon: '≡' },
   { id: 'import', label: 'Import', icon: '+' },
 ];
@@ -150,6 +151,21 @@ export default function Home() {
     debit: entries.filter((entry) => entry.accountNumber === account.number && entry.amount >= 0),
     credit: entries.filter((entry) => entry.accountNumber === account.number && entry.amount < 0),
   })), [accounts, entries]);
+
+  const trialBalance = useMemo(() => tAccounts.map((account) => {
+    const debit = account.debit.reduce((sum, entry) => sum + entry.amount, 0);
+    const credit = account.credit.reduce((sum, entry) => sum + Math.abs(entry.amount), 0);
+    return { number: account.number, name: account.name, debit, credit, balance: debit - credit };
+  }), [tAccounts]);
+
+  const trialTotals = trialBalance.reduce(
+    (totals, account) => ({
+      debit: totals.debit + account.debit,
+      credit: totals.credit + account.credit,
+      balance: totals.balance + account.balance,
+    }),
+    { debit: 0, credit: 0, balance: 0 },
+  );
 
   const filteredEntries = entries.filter((entry) => {
     const needle = query.toLowerCase();
@@ -290,6 +306,36 @@ export default function Home() {
               </>
             )}
 
+            {view === 'trialbalance' && (
+              <>
+                <PageHeading eyebrow={`${trialBalance.length} konti`} title="Saldobalance" description="Samlet debet, kredit og saldo pr. konto for de indlæste posteringer." />
+                <article className="overflow-hidden rounded-2xl border border-[#dfe5e2] bg-white shadow-[0_1px_2px_rgb(20_40_32/3%)]">
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[720px] text-left text-sm">
+                      <thead className="bg-[#fafbfa] text-xs font-medium text-[#74807b]">
+                        <tr><th className="px-5 py-3">Kontonr.</th><th className="px-5 py-3">Kontonavn</th><th className="px-5 py-3 text-right">Debet</th><th className="px-5 py-3 text-right">Kredit</th><th className="px-5 py-3 text-right">Saldo</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#edf0ef]">
+                        {trialBalance.map((account) => (
+                          <tr key={account.number} className="text-[#44504b]">
+                            <td className="px-5 py-4 font-mono text-xs text-[#68746f]">{account.number}</td>
+                            <td className="px-5 py-4 font-medium text-[#24312c]">{account.name}</td>
+                            <td className="px-5 py-4 text-right tabular-nums">{money.format(account.debit)}</td>
+                            <td className="px-5 py-4 text-right tabular-nums">{money.format(account.credit)}</td>
+                            <td className={`px-5 py-4 text-right font-semibold tabular-nums ${account.balance < 0 ? 'text-[#a34848]' : 'text-[#196749]'}`}>{money.format(account.balance)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="border-t-2 border-[#cfd8d4] bg-[#f7f9f8] font-semibold">
+                        <tr><td className="px-5 py-4" colSpan={2}>I alt</td><td className="px-5 py-4 text-right tabular-nums">{money.format(trialTotals.debit)}</td><td className="px-5 py-4 text-right tabular-nums">{money.format(trialTotals.credit)}</td><td className={`px-5 py-4 text-right tabular-nums ${Math.abs(trialTotals.balance) < 0.005 ? 'text-[#196749]' : 'text-[#a34848]'}`}>{money.format(trialTotals.balance)}</td></tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  {!trialBalance.length && <p className="p-8 text-center text-sm text-[#74807b]">Indlæs en CSV-fil for at se saldobalancen.</p>}
+                </article>
+              </>
+            )}
+
             {view === 'import' && (
               <>
                 <PageHeading eyebrow="CSV-kontrol" title="Importér regnskabsdata" description="Slip filer her, eller vælg flere CSV-filer på én gang." />
@@ -304,8 +350,8 @@ export default function Home() {
         </section>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-[#dfe5e2] bg-white px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 lg:hidden">
-        {nav.map((item) => <button key={item.id} onClick={() => setView(item.id)} className={`rounded-lg py-2 text-[11px] font-medium ${view === item.id ? 'bg-[#eaf3ef] text-[#165c46]' : 'text-[#68746f]'}`}><span className="mb-1 block text-xs">{item.icon}</span>{item.label}</button>)}
+      <nav className="fixed inset-x-0 bottom-0 z-20 flex overflow-x-auto border-t border-[#dfe5e2] bg-white px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 lg:hidden">
+        {nav.map((item) => <button key={item.id} onClick={() => setView(item.id)} className={`min-w-[76px] flex-1 rounded-lg px-1 py-2 text-[10px] font-medium ${view === item.id ? 'bg-[#eaf3ef] text-[#165c46]' : 'text-[#68746f]'}`}><span className="mb-1 block text-xs">{item.icon}</span>{item.label}</button>)}
       </nav>
 
       <input ref={inputRef} type="file" accept=".csv,text/csv" multiple className="hidden" onChange={(event) => { void importFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
