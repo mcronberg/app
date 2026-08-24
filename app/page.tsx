@@ -1,6 +1,6 @@
 'use client';
 
-import { DragEvent, useMemo, useRef, useState } from 'react';
+import { DragEvent, Fragment, useMemo, useRef, useState } from 'react';
 
 type Entry = {
   id: string;
@@ -16,7 +16,7 @@ type Entry = {
 
 type ValidationIssue = { file: string; line?: number; message: string };
 type ImportedFile = { name: string; rows: number; issues: number };
-type View = 'overview' | 'transactions' | 'taccounts' | 'trialbalance' | 'accounts' | 'import';
+type View = 'overview' | 'transactions' | 'taccounts' | 'trialbalance' | 'accountcards' | 'accounts' | 'import';
 
 const sampleEntries: Entry[] = [
   { id: 'sample-1', file: 'test1.csv', line: 1, date: '2026-01-01', voucher: '1', accountNumber: 1000, account: '1000 RENTER', description: 'Modtagne renter', amount: -1000 },
@@ -34,6 +34,7 @@ const nav: { id: View; label: string; icon: string }[] = [
   { id: 'transactions', label: 'Posteringer', icon: '↕' },
   { id: 'taccounts', label: 'T-konti', icon: 'T' },
   { id: 'trialbalance', label: 'Saldobalance', icon: 'Σ' },
+  { id: 'accountcards', label: 'Kontokort', icon: '▤' },
   { id: 'accounts', label: 'Kontoplan', icon: '≡' },
   { id: 'import', label: 'Import', icon: '+' },
 ];
@@ -152,10 +153,27 @@ export default function Home() {
     credit: entries.filter((entry) => entry.accountNumber === account.number && entry.amount < 0),
   })), [accounts, entries]);
 
+  const accountCards = useMemo(() => accounts.map((account) => {
+    let runningBalance = 0;
+    const postings = entries
+      .filter((entry) => entry.accountNumber === account.number)
+      .sort((a, b) => a.date.localeCompare(b.date) || Number(a.voucher) - Number(b.voucher) || a.line - b.line)
+      .map((entry) => {
+        runningBalance += entry.amount;
+        return { ...entry, runningBalance };
+      });
+    return { ...account, postings, closingBalance: runningBalance };
+  }), [accounts, entries]);
+
   const trialBalance = useMemo(() => tAccounts.map((account) => {
     const debit = account.debit.reduce((sum, entry) => sum + entry.amount, 0);
     const credit = account.credit.reduce((sum, entry) => sum + Math.abs(entry.amount), 0);
-    return { number: account.number, name: account.name, debit, credit, balance: debit - credit };
+    const balance = debit - credit;
+    const category = account.number < 10000 ? 'drift' : 'balance';
+    const nature = category === 'drift'
+      ? (balance <= 0 ? 'Indtægt' : 'Omkostning')
+      : (balance >= 0 ? 'Aktiv' : 'Passiv');
+    return { number: account.number, name: account.name, debit, credit, balance, category, nature };
   }), [tAccounts]);
 
   const trialTotals = trialBalance.reduce(
@@ -166,6 +184,15 @@ export default function Home() {
     }),
     { debit: 0, credit: 0, balance: 0 },
   );
+
+  const driftAccounts = trialBalance.filter((account) => account.category === 'drift');
+  const balanceAccounts = trialBalance.filter((account) => account.category === 'balance');
+  const driftDebit = driftAccounts.reduce((sum, account) => sum + account.debit, 0);
+  const driftCredit = driftAccounts.reduce((sum, account) => sum + account.credit, 0);
+  const driftResult = driftCredit - driftDebit;
+  const assets = balanceAccounts.filter((account) => account.balance > 0).reduce((sum, account) => sum + account.balance, 0);
+  const liabilities = balanceAccounts.filter((account) => account.balance < 0).reduce((sum, account) => sum + Math.abs(account.balance), 0);
+  const balanceControl = assets - liabilities - driftResult;
 
   const filteredEntries = entries.filter((entry) => {
     const needle = query.toLowerCase();
@@ -308,31 +335,101 @@ export default function Home() {
 
             {view === 'trialbalance' && (
               <>
-                <PageHeading eyebrow={`${trialBalance.length} konti`} title="Saldobalance" description="Samlet debet, kredit og saldo pr. konto for de indlæste posteringer." />
+                <PageHeading eyebrow={`${trialBalance.length} konti`} title="Saldobalance" description="Drift og balance er opdelt tydeligt med summer for resultat, aktiver og passiver." />
+                <div className="mb-5 grid gap-4 md:grid-cols-3">
+                  <article className="rounded-2xl border border-[#e8d8b8] bg-[#fffaf0] p-5">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#8a6427]">Drift · resultat</p>
+                    <p className={`mt-3 text-2xl font-semibold tabular-nums ${driftResult < 0 ? 'text-[#a34848]' : 'text-[#6f531f]'}`}>{money.format(driftResult)}</p>
+                    <p className="mt-2 text-xs text-[#806f51]">Indtægter {money.format(driftCredit)} · omkostninger {money.format(driftDebit)}</p>
+                  </article>
+                  <article className="rounded-2xl border border-[#bfdcd0] bg-[#f2faf6] p-5">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#247055]">Balance · aktiver</p>
+                    <p className="mt-3 text-2xl font-semibold tabular-nums text-[#165c46]">{money.format(assets)}</p>
+                    <p className="mt-2 text-xs text-[#568170]">Balancekonti med nettodebet</p>
+                  </article>
+                  <article className="rounded-2xl border border-[#d7d2e3] bg-[#f8f6fb] p-5">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#675d7b]">Balance · passiver</p>
+                    <p className="mt-3 text-2xl font-semibold tabular-nums text-[#4e465f]">{money.format(liabilities)}</p>
+                    <p className="mt-2 text-xs text-[#766d87]">Balancekonti med nettokredit</p>
+                  </article>
+                </div>
+                <div className={`mb-5 flex flex-col gap-1 rounded-xl border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${Math.abs(balanceControl) < 0.005 ? 'border-[#bfdcd0] bg-[#edf8f3] text-[#196749]' : 'border-[#efc9c4] bg-[#fff5f4] text-[#a34848]'}`}>
+                  <span className="font-semibold">{Math.abs(balanceControl) < 0.005 ? '✓ Balancen stemmer' : '! Balancen stemmer ikke'}</span>
+                  <span className="text-xs">Aktiver = passiver + årets resultat · difference {money.format(balanceControl)}</span>
+                </div>
                 <article className="overflow-hidden rounded-2xl border border-[#dfe5e2] bg-white shadow-[0_1px_2px_rgb(20_40_32/3%)]">
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[720px] text-left text-sm">
+                    <table className="w-full min-w-[820px] text-left text-sm">
                       <thead className="bg-[#fafbfa] text-xs font-medium text-[#74807b]">
-                        <tr><th className="px-5 py-3">Kontonr.</th><th className="px-5 py-3">Kontonavn</th><th className="px-5 py-3 text-right">Debet</th><th className="px-5 py-3 text-right">Kredit</th><th className="px-5 py-3 text-right">Saldo</th></tr>
+                        <tr><th className="px-5 py-3">Kontonr.</th><th className="px-5 py-3">Kontonavn</th><th className="px-5 py-3">Type</th><th className="px-5 py-3 text-right">Debet</th><th className="px-5 py-3 text-right">Kredit</th><th className="px-5 py-3 text-right">Saldo</th></tr>
                       </thead>
                       <tbody className="divide-y divide-[#edf0ef]">
-                        {trialBalance.map((account) => (
-                          <tr key={account.number} className="text-[#44504b]">
-                            <td className="px-5 py-4 font-mono text-xs text-[#68746f]">{account.number}</td>
-                            <td className="px-5 py-4 font-medium text-[#24312c]">{account.name}</td>
-                            <td className="px-5 py-4 text-right tabular-nums">{money.format(account.debit)}</td>
-                            <td className="px-5 py-4 text-right tabular-nums">{money.format(account.credit)}</td>
-                            <td className={`px-5 py-4 text-right font-semibold tabular-nums ${account.balance < 0 ? 'text-[#a34848]' : 'text-[#196749]'}`}>{money.format(account.balance)}</td>
-                          </tr>
+                        {[
+                          { label: 'Drift', detail: 'Konti under 10000', rows: driftAccounts, color: 'bg-[#fff6e5] text-[#7b5a22]' },
+                          { label: 'Balance', detail: 'Konti fra 10000', rows: balanceAccounts, color: 'bg-[#edf6f2] text-[#24664e]' },
+                        ].map((section) => (
+                          <Fragment key={section.label}>
+                            <tr className={section.color}><td colSpan={6} className="px-5 py-2.5 text-xs font-bold uppercase tracking-[0.1em]">{section.label} <span className="ml-2 font-normal normal-case tracking-normal opacity-70">{section.detail}</span></td></tr>
+                            {section.rows.map((account) => (
+                              <tr key={account.number} className="text-[#44504b]">
+                                <td className="px-5 py-4 font-mono text-xs text-[#68746f]">{account.number}</td>
+                                <td className="px-5 py-4 font-medium text-[#24312c]">{account.name}</td>
+                                <td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${account.category === 'drift' ? 'bg-[#fff2d8] text-[#806024]' : 'bg-[#e6f3ed] text-[#24664e]'}`}>{account.nature}</span></td>
+                                <td className="px-5 py-4 text-right tabular-nums">{money.format(account.debit)}</td>
+                                <td className="px-5 py-4 text-right tabular-nums">{money.format(account.credit)}</td>
+                                <td className={`px-5 py-4 text-right font-semibold tabular-nums ${account.balance < 0 ? 'text-[#a34848]' : 'text-[#196749]'}`}>{money.format(account.balance)}</td>
+                              </tr>
+                            ))}
+                          </Fragment>
                         ))}
                       </tbody>
                       <tfoot className="border-t-2 border-[#cfd8d4] bg-[#f7f9f8] font-semibold">
-                        <tr><td className="px-5 py-4" colSpan={2}>I alt</td><td className="px-5 py-4 text-right tabular-nums">{money.format(trialTotals.debit)}</td><td className="px-5 py-4 text-right tabular-nums">{money.format(trialTotals.credit)}</td><td className={`px-5 py-4 text-right tabular-nums ${Math.abs(trialTotals.balance) < 0.005 ? 'text-[#196749]' : 'text-[#a34848]'}`}>{money.format(trialTotals.balance)}</td></tr>
+                        <tr><td className="px-5 py-4" colSpan={3}>Alle konti i alt</td><td className="px-5 py-4 text-right tabular-nums">{money.format(trialTotals.debit)}</td><td className="px-5 py-4 text-right tabular-nums">{money.format(trialTotals.credit)}</td><td className={`px-5 py-4 text-right tabular-nums ${Math.abs(trialTotals.balance) < 0.005 ? 'text-[#196749]' : 'text-[#a34848]'}`}>{money.format(trialTotals.balance)}</td></tr>
                       </tfoot>
                     </table>
                   </div>
                   {!trialBalance.length && <p className="p-8 text-center text-sm text-[#74807b]">Indlæs en CSV-fil for at se saldobalancen.</p>}
                 </article>
+              </>
+            )}
+
+            {view === 'accountcards' && (
+              <>
+                <PageHeading eyebrow={`${accountCards.length} kontokort`} title="Kontokort" description="Alle posteringer pr. konto med debet, kredit og løbende saldo i datoorden." />
+                {accountCards.length ? (
+                  <div className="space-y-5">
+                    {accountCards.map((account) => (
+                      <article key={account.number} className="overflow-hidden rounded-2xl border border-[#dfe5e2] bg-white shadow-[0_1px_2px_rgb(20_40_32/3%)]">
+                        <div className="flex flex-col gap-3 border-b border-[#e5eae8] p-5 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${account.number < 10000 ? 'bg-[#fff2d8] text-[#806024]' : 'bg-[#e6f3ed] text-[#24664e]'}`}>{account.number < 10000 ? 'Drift' : 'Balance'}</span>
+                            <div><h2 className="font-semibold">{account.number} {account.name}</h2><p className="mt-0.5 text-xs text-[#74807b]">{account.postings.length} {account.postings.length === 1 ? 'postering' : 'posteringer'}</p></div>
+                          </div>
+                          <div className="text-left sm:text-right"><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#87918d]">Slutsaldo</p><p className={`mt-1 font-semibold tabular-nums ${account.closingBalance < 0 ? 'text-[#a34848]' : 'text-[#196749]'}`}>{money.format(account.closingBalance)}</p></div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[820px] text-left text-sm">
+                            <thead className="bg-[#fafbfa] text-xs font-medium text-[#74807b]"><tr><th className="px-5 py-3">Dato</th><th className="px-5 py-3">Bilag</th><th className="px-5 py-3">Tekst</th><th className="px-5 py-3 text-right">Debet</th><th className="px-5 py-3 text-right">Kredit</th><th className="px-5 py-3 text-right">Løbende saldo</th></tr></thead>
+                            <tbody className="divide-y divide-[#edf0ef]">
+                              {account.postings.map((entry) => (
+                                <tr key={entry.id} className="text-[#44504b]">
+                                  <td className="whitespace-nowrap px-5 py-4">{dateLabel(entry.date)}</td>
+                                  <td className="px-5 py-4 font-medium text-[#568170]">[{entry.voucher}]</td>
+                                  <td className="px-5 py-4">{entry.description}</td>
+                                  <td className="px-5 py-4 text-right tabular-nums">{entry.amount >= 0 ? money.format(entry.amount) : '—'}</td>
+                                  <td className="px-5 py-4 text-right tabular-nums">{entry.amount < 0 ? money.format(Math.abs(entry.amount)) : '—'}</td>
+                                  <td className={`px-5 py-4 text-right font-semibold tabular-nums ${entry.runningBalance < 0 ? 'text-[#a34848]' : 'text-[#196749]'}`}>{money.format(entry.runningBalance)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-2xl border border-[#dfe5e2] bg-white p-8 text-center text-sm text-[#74807b]">Indlæs en CSV-fil for at se kontokort.</p>
+                )}
               </>
             )}
 
