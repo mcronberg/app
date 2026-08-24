@@ -16,11 +16,11 @@ type Entry = {
 
 type ValidationIssue = { file: string; line?: number; message: string };
 type ImportedFile = { name: string; rows: number; issues: number };
-type View = 'overview' | 'transactions' | 'accounts' | 'import';
+type View = 'overview' | 'transactions' | 'taccounts' | 'accounts' | 'import';
 
 const sampleEntries: Entry[] = [
-  { id: 'sample-1', file: 'test1.csv', line: 1, date: '2026-01-01', voucher: '1', accountNumber: 1000, account: '1000 Renter', description: 'Modtagne renter', amount: -1000 },
-  { id: 'sample-2', file: 'test1.csv', line: 2, date: '2026-01-01', voucher: '1', accountNumber: 10000, account: '10000 Bank', description: 'Modtagne renter', amount: 1000 },
+  { id: 'sample-1', file: 'test1.csv', line: 1, date: '2026-01-01', voucher: '1', accountNumber: 1000, account: '1000 RENTER', description: 'Modtagne renter', amount: -1000 },
+  { id: 'sample-2', file: 'test1.csv', line: 2, date: '2026-01-01', voucher: '1', accountNumber: 10000, account: '10000 BANK', description: 'Modtagne renter', amount: 1000 },
 ];
 
 const money = new Intl.NumberFormat('da-DK', {
@@ -32,6 +32,7 @@ const money = new Intl.NumberFormat('da-DK', {
 const nav: { id: View; label: string; icon: string }[] = [
   { id: 'overview', label: 'Overblik', icon: '●' },
   { id: 'transactions', label: 'Posteringer', icon: '↕' },
+  { id: 'taccounts', label: 'T-konti', icon: 'T' },
   { id: 'accounts', label: 'Kontoplan', icon: '≡' },
   { id: 'import', label: 'Import', icon: '+' },
 ];
@@ -90,7 +91,7 @@ function parseCsv(name: string, content: string) {
       date,
       voucher,
       accountNumber: Number(accountMatch![1]),
-      account,
+      account: `${accountMatch![1]} ${accountMatch![2].toLocaleUpperCase('da-DK')}`,
       description,
       amount: amount!,
     });
@@ -118,7 +119,7 @@ export default function Home() {
   const [showFormat, setShowFormat] = useState(false);
   const [query, setQuery] = useState('');
 
-  const voucherIssues = useMemo(() => {
+  const voucherIssues = useMemo<ValidationIssue[]>(() => {
     const sums = new Map<string, number>();
     entries.forEach((entry) => sums.set(entry.voucher, (sums.get(entry.voucher) ?? 0) + entry.amount));
     return [...sums.entries()]
@@ -143,6 +144,12 @@ export default function Home() {
     });
     return [...balances.values()].sort((a, b) => a.number - b.number);
   }, [entries]);
+
+  const tAccounts = useMemo(() => accounts.map((account) => ({
+    ...account,
+    debit: entries.filter((entry) => entry.accountNumber === account.number && entry.amount >= 0),
+    credit: entries.filter((entry) => entry.accountNumber === account.number && entry.amount < 0),
+  })), [accounts, entries]);
 
   const filteredEntries = entries.filter((entry) => {
     const needle = query.toLowerCase();
@@ -270,6 +277,19 @@ export default function Home() {
               </>
             )}
 
+            {view === 'taccounts' && (
+              <>
+                <PageHeading eyebrow={`${tAccounts.length} konti`} title="T-konti" description="Debet står til venstre, kredit til højre. Bilagsnummeret vises i kantede parenteser før beløbet." />
+                {tAccounts.length ? (
+                  <div className="grid items-start gap-5 xl:grid-cols-2">
+                    {tAccounts.map((account) => <TAccount key={account.number} account={account} />)}
+                  </div>
+                ) : (
+                  <p className="rounded-2xl border border-[#dfe5e2] bg-white p-8 text-center text-sm text-[#74807b]">Indlæs en CSV-fil for at se T-konti.</p>
+                )}
+              </>
+            )}
+
             {view === 'import' && (
               <>
                 <PageHeading eyebrow="CSV-kontrol" title="Importér regnskabsdata" description="Slip filer her, eller vælg flere CSV-filer på én gang." />
@@ -284,7 +304,7 @@ export default function Home() {
         </section>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t border-[#dfe5e2] bg-white px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-[#dfe5e2] bg-white px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 lg:hidden">
         {nav.map((item) => <button key={item.id} onClick={() => setView(item.id)} className={`rounded-lg py-2 text-[11px] font-medium ${view === item.id ? 'bg-[#eaf3ef] text-[#165c46]' : 'text-[#68746f]'}`}><span className="mb-1 block text-xs">{item.icon}</span>{item.label}</button>)}
       </nav>
 
@@ -305,6 +325,45 @@ function PageHeading({ eyebrow, title, description, action, onAction }: { eyebro
 
 function TransactionTable({ entries, subtitle, valid, onShowAll }: { entries: Entry[]; subtitle: string; valid: boolean; onShowAll?: () => void }) {
   return <article className="overflow-hidden rounded-2xl border border-[#dfe5e2] bg-white shadow-[0_1px_2px_rgb(20_40_32/3%)]"><div className="flex flex-col gap-3 border-b border-[#e5eae8] p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold">{onShowAll ? 'Seneste posteringer' : 'Alle posteringer'}</h2><p className="mt-1 text-xs text-[#74807b]">{subtitle}</p></div><div className="flex items-center gap-3"><span className={`w-fit rounded-full px-3 py-1.5 text-xs font-semibold ${valid ? 'bg-[#e8f5ef] text-[#196749]' : 'bg-[#fbe9e7] text-[#a34848]'}`}>{valid ? '✓ Regnskabet er gyldigt' : '! Kontrollér importen'}</span>{onShowAll && <button onClick={onShowAll} className="text-xs font-semibold text-[#165c46] hover:underline">Se alle</button>}</div></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-[#fafbfa] text-xs font-medium text-[#74807b]"><tr>{['Dato', 'Bilag', 'Konto', 'Tekst', 'Beløb'].map((heading) => <th key={heading} className={`px-5 py-3 ${heading === 'Beløb' ? 'text-right' : ''}`}>{heading}</th>)}</tr></thead><tbody className="divide-y divide-[#edf0ef]">{entries.map((row) => <tr key={row.id} className="text-[#44504b] transition hover:bg-[#fbfcfb]"><td className="whitespace-nowrap px-5 py-4">{dateLabel(row.date)}</td><td className="px-5 py-4">{row.voucher}</td><td className="px-5 py-4 font-medium text-[#24312c]">{row.account}</td><td className="px-5 py-4">{row.description}</td><td className={`px-5 py-4 text-right font-medium tabular-nums ${row.amount < 0 ? 'text-[#a34848]' : 'text-[#196749]'}`}>{money.format(row.amount)}</td></tr>)}</tbody></table></div>{!entries.length && <p className="p-8 text-center text-sm text-[#74807b]">Ingen posteringer matcher din søgning.</p>}</article>;
+}
+
+function TAccount({ account }: { account: { number: number; name: string; debit: Entry[]; credit: Entry[] } }) {
+  const debitTotal = account.debit.reduce((sum, entry) => sum + entry.amount, 0);
+  const creditTotal = account.credit.reduce((sum, entry) => sum + Math.abs(entry.amount), 0);
+  const columns = [
+    { label: 'Debet', entries: account.debit, total: debitTotal },
+    { label: 'Kredit', entries: account.credit, total: creditTotal },
+  ];
+
+  return (
+    <article className="overflow-hidden rounded-2xl border border-[#dfe5e2] bg-white shadow-[0_1px_2px_rgb(20_40_32/3%)]">
+      <div className="px-5 pb-3 pt-5 text-center">
+        <h2 className="font-semibold">{account.number} {account.name}</h2>
+      </div>
+      <div className="mx-5 grid grid-cols-2 border-t-2 border-[#35443e]">
+        {columns.map((column, index) => (
+          <div key={column.label} className={`min-w-0 pb-4 pt-3 ${index === 1 ? 'border-l-2 border-[#35443e] pl-4' : 'pr-4'}`}>
+            <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.12em] text-[#87918d]">{column.label}</p>
+            <div className="space-y-3">
+              {column.entries.map((entry) => (
+                <div key={entry.id} className="text-xs">
+                  <div className="flex items-baseline justify-between gap-2 font-medium tabular-nums text-[#26332e]">
+                    <span className="shrink-0 text-[#568170]">[{entry.voucher}]</span>
+                    <span className="text-right">{money.format(Math.abs(entry.amount))}</span>
+                  </div>
+                  <p className="mt-0.5 truncate text-[10px] text-[#87918d]" title={entry.description}>{entry.description}</p>
+                </div>
+              ))}
+              {!column.entries.length && <p className="py-2 text-center text-xs text-[#b0b7b4]">—</p>}
+            </div>
+            <div className="mt-4 flex justify-between gap-2 border-t border-[#dfe5e2] pt-2 text-xs font-semibold tabular-nums">
+              <span>I alt</span><span>{money.format(column.total)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
 }
 
 function EmptyImport({ isDragging, setIsDragging, handleDrop, onPick, compact = false }: { isDragging: boolean; setIsDragging: (value: boolean) => void; handleDrop: (event: DragEvent<HTMLDivElement>) => void; onPick: () => void; compact?: boolean }) {
