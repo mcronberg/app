@@ -19,6 +19,15 @@ type ImportedFile = { name: string; rows: number; issues: number };
 type View = 'overview' | 'transactions' | 'taccounts' | 'trialbalance' | 'accountcards' | 'accounts' | 'import';
 type EntryDraft = Pick<Entry, 'date' | 'voucher' | 'account' | 'description' | 'amount'>;
 type EntryEditorState = { mode: 'new' } | { mode: 'edit'; entry: Entry } | null;
+type FinancialSnapshot = { result: number; assets: number; liabilities: number };
+type GuideScenario = {
+  id: string;
+  title: string;
+  explanation: string;
+  debitAccount: string;
+  creditAccount: string;
+  description: string;
+};
 
 const moneyFormatter = new Intl.NumberFormat('da-DK', {
   style: 'currency',
@@ -41,6 +50,26 @@ const nav: { id: View; label: string; icon: string }[] = [
   { id: 'accounts', label: 'Kontoplan', icon: '≡' },
   { id: 'import', label: 'Import', icon: '+' },
 ];
+
+const guideScenarios: GuideScenario[] = [
+  { id: 'cash-sale', title: 'Kontantsalg', explanation: 'Pengene går ind på banken, og virksomheden får en indtægt.', debitAccount: '10000 BANK', creditAccount: '1000 SALG', description: 'Kontantsalg' },
+  { id: 'credit-sale', title: 'Salg på kredit', explanation: 'Kunden skylder pengene, mens salget bliver en indtægt med det samme.', debitAccount: '11000 DEBITORER', creditAccount: '1000 SALG', description: 'Salg på kredit' },
+  { id: 'customer-payment', title: 'Kunden betaler', explanation: 'Banken stiger, og kundens gæld til virksomheden falder.', debitAccount: '10000 BANK', creditAccount: '11000 DEBITORER', description: 'Kunde betaler faktura' },
+  { id: 'rent', title: 'Betal husleje', explanation: 'Husleje er en omkostning, og pengene går ud af banken.', debitAccount: '3000 HUSLEJE', creditAccount: '10000 BANK', description: 'Betalt husleje' },
+  { id: 'credit-purchase', title: 'Køb på kredit', explanation: 'Virksomheden får en omkostning nu og skylder leverandøren pengene.', debitAccount: '2000 KONTORARTIKLER', creditAccount: '21000 KREDITORER', description: 'Køb af kontorartikler på kredit' },
+  { id: 'capital', title: 'Indskyd kapital', explanation: 'Pengene går ind på banken og modsvares af virksomhedens egenkapital.', debitAccount: '10000 BANK', creditAccount: '20000 EGENKAPITAL', description: 'Indskudt kapital' },
+];
+
+function financialSnapshot(postings: Array<{ accountNumber: number; amount: number }>): FinancialSnapshot {
+  const result = -postings.filter((entry) => entry.accountNumber < 10000).reduce((sum, entry) => sum + entry.amount, 0);
+  const balances = new Map<number, number>();
+  postings
+    .filter((entry) => entry.accountNumber >= 10000)
+    .forEach((entry) => balances.set(entry.accountNumber, (balances.get(entry.accountNumber) ?? 0) + entry.amount));
+  const assets = [...balances.values()].filter((balance) => balance > 0).reduce((sum, balance) => sum + balance, 0);
+  const liabilities = [...balances.values()].filter((balance) => balance < 0).reduce((sum, balance) => sum + Math.abs(balance), 0);
+  return { result, assets, liabilities };
+}
 
 function parseAmount(raw: string) {
   const compact = raw.trim().replace(/\s/g, '');
@@ -122,6 +151,7 @@ export default function Home() {
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [entryEditor, setEntryEditor] = useState<EntryEditorState>(null);
   const [query, setQuery] = useState('');
 
@@ -293,6 +323,23 @@ export default function Home() {
     setEntries((current) => current.filter((candidate) => candidate.id !== entry.id));
   }
 
+  function saveGuidedEntries(drafts: EntryDraft[]) {
+    const firstLine = entries.reduce((maximum, entry) => Math.max(maximum, entry.line), 0) + 1;
+    const stamp = Date.now();
+    const created = drafts.map((draft, index): Entry => ({
+      ...draft,
+      id: `guided-${stamp}-${index}`,
+      file: 'guidet-regnskab.csv',
+      line: firstLine + index,
+      accountNumber: Number(draft.account.match(/^\d+/)?.[0]),
+    }));
+    setEntries((current) => [...current, ...created]);
+    if (!files.length) setFiles([{ name: 'guidet-regnskab.csv', rows: created.length, issues: 0 }]);
+    setShowGuide(false);
+    setQuery('');
+    setView('transactions');
+  }
+
   return (
     <main className="min-h-screen bg-[#f5f7f6] text-[#18201d]">
       <header className="sticky top-0 z-20 border-b border-[#dfe5e2] bg-white/95 backdrop-blur">
@@ -357,7 +404,8 @@ export default function Home() {
               <>
                 <PageHeading eyebrow={`${entries.length} linjer`} title="Posteringer" description="Rediger, tilføj og slet linjer. Alle rapporter opdateres med det samme." />
                 <div className="mb-4 flex flex-wrap gap-2.5">
-                  <button onClick={() => setEntryEditor({ mode: 'new' })} className="rounded-xl bg-[#165c46] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#104d3a]">+ Tilføj postering</button>
+                  <button onClick={() => setShowGuide(true)} className="rounded-xl bg-[#165c46] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#104d3a]">✦ Guidet postering</button>
+                  <button onClick={() => setEntryEditor({ mode: 'new' })} className="rounded-xl border border-[#8cb4a5] bg-[#edf6f2] px-4 py-2.5 text-sm font-semibold text-[#165c46]">+ Tilføj manuelt</button>
                   <button onClick={() => inputRef.current?.click()} className="rounded-xl border border-[#8cb4a5] bg-[#edf6f2] px-4 py-2.5 text-sm font-semibold text-[#165c46]">Importér CSV</button>
                   <a href={exportHref} download={exportFileName} aria-disabled={!entries.length} onClick={(event) => { if (!entries.length) event.preventDefault(); }} className={`rounded-xl border border-[#d8dfdc] bg-white px-4 py-2.5 text-sm font-semibold text-[#5d6863] ${entries.length ? '' : 'cursor-not-allowed opacity-45'}`}>Eksportér CSV</a>
                 </div>
@@ -573,6 +621,15 @@ export default function Home() {
           onClose={() => setEntryEditor(null)}
         />
       )}
+      {showGuide && (
+        <GuidedEntryDialog
+          entries={entries}
+          suggestedDate={entries[entries.length - 1]?.date ?? new Date().toISOString().slice(0, 10)}
+          suggestedVoucher={String(entries.reduce((maximum, entry) => Math.max(maximum, Number(entry.voucher)), 0) + 1)}
+          onSave={saveGuidedEntries}
+          onClose={() => setShowGuide(false)}
+        />
+      )}
       {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
     </main>
   );
@@ -686,6 +743,117 @@ function EmptyImport({ isDragging, setIsDragging, handleDrop, onPick, onLoadTest
   );
 }
 
+function GuidedEntryDialog({ entries, suggestedDate, suggestedVoucher, onSave, onClose }: { entries: Entry[]; suggestedDate: string; suggestedVoucher: string; onSave: (drafts: EntryDraft[]) => void; onClose: () => void }) {
+  const [scenarioId, setScenarioId] = useState(guideScenarios[0].id);
+  const [date, setDate] = useState(suggestedDate);
+  const [voucher, setVoucher] = useState(suggestedVoucher);
+  const [description, setDescription] = useState(guideScenarios[0].description);
+  const [amount, setAmount] = useState('');
+  const [error, setError] = useState('');
+  const scenario = guideScenarios.find((candidate) => candidate.id === scenarioId) ?? guideScenarios[0];
+  const parsedAmount = parseAmount(amount);
+  const previewAmount = parsedAmount === null ? 0 : Math.abs(parsedAmount);
+  const debitAccountNumber = Number(scenario.debitAccount.match(/^\d+/)?.[0]);
+  const creditAccountNumber = Number(scenario.creditAccount.match(/^\d+/)?.[0]);
+  const before = financialSnapshot(entries);
+  const after = financialSnapshot([
+    ...entries,
+    { accountNumber: debitAccountNumber, amount: previewAmount },
+    { accountNumber: creditAccountNumber, amount: -previewAmount },
+  ]);
+  const snapshotRows: Array<{ label: string; before: number; after: number }> = [
+    { label: 'Resultat', before: before.result, after: after.result },
+    { label: 'Aktiver', before: before.assets, after: after.assets },
+    { label: 'Passiver', before: before.liabilities, after: after.liabilities },
+  ];
+  const fieldClass = 'mt-1.5 w-full rounded-xl border border-[#d8dfdc] bg-white px-3.5 py-3 text-sm outline-none transition focus:border-[#6b9b88] focus:ring-4 focus:ring-[#dcebe5]';
+
+  function chooseScenario(next: GuideScenario) {
+    setScenarioId(next.id);
+    setDescription(next.description);
+    setError('');
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!isRealDate(date)) return setError('Vælg en gyldig dato.');
+    if (!/^\d+$/.test(voucher.trim())) return setError('Bilag skal være et helt tal.');
+    if (!description.trim() || description.includes(';')) return setError('Tekst skal udfyldes og må ikke indeholde semikolon.');
+    if (parsedAmount === null || parsedAmount <= 0) return setError('Beløbet skal være større end 0.');
+    const balancedAmount = Math.abs(parsedAmount);
+    onSave([
+      { date, voucher: voucher.trim(), account: scenario.debitAccount, description: description.trim(), amount: balancedAmount },
+      { date, voucher: voucher.trim(), account: scenario.creditAccount, description: description.trim(), amount: -balancedAmount },
+    ]);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#111916]/45 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="guide-title" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+      <form onSubmit={submit} className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl sm:p-8">
+        <div className="flex items-start justify-between gap-5">
+          <div><p className="text-sm font-medium text-[#568170]">Bogføringsguide</p><h2 id="guide-title" className="mt-1 text-2xl font-semibold tracking-tight">Hvad er der sket?</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-[#68746f]">Vælg en hændelse. Guiden finder debet og kredit og viser virkningen, før du bogfører.</p></div>
+          <button type="button" onClick={onClose} aria-label="Luk" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#f2f5f3] text-lg text-[#68746f]">×</button>
+        </div>
+
+        <section className="mt-6">
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.12em] text-[#87918d]">1 · Vælg hændelse</p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {guideScenarios.map((candidate) => (
+              <button key={candidate.id} type="button" onClick={() => chooseScenario(candidate)} className={`rounded-2xl border p-4 text-left transition ${candidate.id === scenario.id ? 'border-[#6b9b88] bg-[#edf6f2] ring-2 ring-[#dcebe5]' : 'border-[#dfe5e2] hover:bg-[#fafbfa]'}`}>
+                <span className="text-sm font-semibold text-[#26332e]">{candidate.title}</span>
+                <span className="mt-1.5 block text-xs leading-5 text-[#74807b]">{candidate.explanation}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-7">
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.12em] text-[#87918d]">2 · Udfyld bilaget</p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="text-xs font-semibold text-[#44504b]">Dato<input type="date" value={date} onChange={(event) => setDate(event.target.value)} className={fieldClass} /></label>
+            <label className="text-xs font-semibold text-[#44504b]">Bilagsnummer<input inputMode="numeric" value={voucher} onChange={(event) => setVoucher(event.target.value)} className={fieldClass} /></label>
+            <label className="text-xs font-semibold text-[#44504b]">Beløb<input aria-label="Beløb" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Fx 1250" className={fieldClass} /></label>
+            <label className="text-xs font-semibold text-[#44504b]">Tekst<input value={description} onChange={(event) => setDescription(event.target.value)} className={fieldClass} /></label>
+          </div>
+        </section>
+
+        <section className="mt-7">
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.12em] text-[#87918d]">3 · Se konteringen</p>
+          <div className="grid overflow-hidden rounded-2xl border border-[#dfe5e2] sm:grid-cols-2">
+            <article className="bg-[#f2faf6] p-5 sm:border-r sm:border-[#bfdcd0]">
+              <div className="flex items-center justify-between gap-3"><span className="rounded-full bg-[#dcefe6] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#196749]">Debet</span><strong className="tabular-nums text-[#196749]">{money.format(previewAmount)}</strong></div>
+              <p className="mt-3 font-semibold text-[#26332e]">{scenario.debitAccount}</p>
+              <p className="mt-1 text-xs leading-5 text-[#568170]">Det virksomheden får, eller den omkostning der opstår.</p>
+            </article>
+            <article className="border-t border-[#ead0cc] bg-[#fff8f7] p-5 sm:border-t-0">
+              <div className="flex items-center justify-between gap-3"><span className="rounded-full bg-[#f8e4e1] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#a34848]">Kredit</span><strong className="tabular-nums text-[#a34848]">{money.format(previewAmount)}</strong></div>
+              <p className="mt-3 font-semibold text-[#26332e]">{scenario.creditAccount}</p>
+              <p className="mt-1 text-xs leading-5 text-[#98605c]">Hvor pengene eller finansieringen kommer fra.</p>
+            </article>
+          </div>
+          <p className="mt-2 text-center text-xs font-medium text-[#568170]">Debet {money.format(previewAmount)} = Kredit {money.format(previewAmount)} · bilaget balancerer</p>
+        </section>
+
+        <section className="mt-7">
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.12em] text-[#87918d]">4 · Før og efter</p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {snapshotRows.map((row) => {
+              const difference = row.after - row.before;
+              return <article key={row.label} className="rounded-2xl border border-[#dfe5e2] bg-[#fafbfa] p-4"><p className="text-xs font-semibold text-[#44504b]">{row.label}</p><div className="mt-3 flex items-center justify-between gap-2 text-xs tabular-nums text-[#74807b]"><span>{money.format(row.before)}</span><span>→</span><strong className="text-sm text-[#26332e]">{money.format(row.after)}</strong></div><p className={`mt-2 text-right text-xs font-semibold tabular-nums ${difference < 0 ? 'text-[#a34848]' : difference > 0 ? 'text-[#196749]' : 'text-[#87918d]'}`}>{difference === 0 ? 'Ingen ændring' : `${difference > 0 ? '+' : ''}${money.format(difference)}`}</p></article>;
+            })}
+          </div>
+        </section>
+
+        {error && <p className="mt-5 rounded-xl border border-[#efc9c4] bg-[#fff5f4] px-4 py-3 text-sm text-[#a34848]">{error}</p>}
+        <div className="mt-7 flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onClose} className="rounded-xl border border-[#d8dfdc] px-4 py-2.5 text-sm font-semibold text-[#5d6863]">Annuller</button>
+          <button type="submit" className="rounded-xl bg-[#165c46] px-5 py-2.5 text-sm font-semibold text-white">Bogfør bilag</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function EntryDialog({ entry, suggestedDate, suggestedVoucher, onSave, onClose }: { entry?: Entry; suggestedDate: string; suggestedVoucher: string; onSave: (draft: EntryDraft) => void; onClose: () => void }) {
   const [date, setDate] = useState(entry?.date ?? suggestedDate);
   const [voucher, setVoucher] = useState(entry?.voucher ?? suggestedVoucher);
@@ -742,7 +910,8 @@ function EntryDialog({ entry, suggestedDate, suggestedVoucher, onSave, onClose }
 function HelpDialog({ onClose }: { onClose: () => void }) {
   const features = [
     ['Overblik', 'Se resultat, balance og de seneste posteringer.'],
-    ['Posteringer', 'Søg, tilføj, rediger eller slet linjer. Ændringer slår straks igennem i alle visninger.'],
+    ['Bogføringsguide', 'Vælg en typisk hændelse, indtast beløbet og se debet, kredit samt resultat, aktiver og passiver før og efter. Guiden opretter et balanceret bilag.'],
+    ['Posteringer', 'Start eventuelt med et tomt regnskab og vælg “Tilføj manuelt”. Du kan også søge, redigere eller slette linjer. Ændringer slår straks igennem i alle visninger.'],
     ['T-konti', 'Se debet til venstre og kredit til højre, opdelt i drift og balance. Bilagsnummeret står i kantede parenteser.'],
     ['Saldobalance', 'Sammenlign debet, kredit og saldo for drift, aktiver og passiver.'],
     ['Kontokort', 'Følg alle posteringer og den løbende saldo på hver konto.'],
@@ -757,7 +926,7 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
           <div><p className="text-sm font-medium text-[#568170]">Hjælp</p><h2 id="help-title" className="mt-1 text-2xl font-semibold tracking-tight">Sådan bruger du Bogført</h2></div>
           <button onClick={onClose} aria-label="Luk" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#f2f5f3] text-lg text-[#68746f]">×</button>
         </div>
-        <p className="mt-4 text-sm leading-6 text-[#68746f]">Start med testfilen, eller importér din egen CSV. Brug derefter visningerne til at undersøge, hvordan hver postering påvirker regnskabet.</p>
+        <p className="mt-4 text-sm leading-6 text-[#68746f]">Du kan starte med et tomt regnskab og selv tilføje posteringer, prøve testfilen eller importere din egen CSV. Brug derefter visningerne til at undersøge, hvordan hver postering påvirker regnskabet.</p>
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
           {features.map(([title, text]) => <article key={title} className="rounded-2xl border border-[#e3e8e6] p-4"><h3 className="text-sm font-semibold text-[#26332e]">{title}</h3><p className="mt-1.5 text-xs leading-5 text-[#74807b]">{text}</p></article>)}
         </div>
