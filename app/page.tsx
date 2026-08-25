@@ -153,6 +153,8 @@ export default function Home() {
     debit: entries.filter((entry) => entry.accountNumber === account.number && entry.amount >= 0),
     credit: entries.filter((entry) => entry.accountNumber === account.number && entry.amount < 0),
   })), [accounts, entries]);
+  const driftTAccounts = tAccounts.filter((account) => account.number < 10000);
+  const balanceTAccounts = tAccounts.filter((account) => account.number >= 10000);
 
   const accountCards = useMemo(() => accounts.map((account) => {
     let runningBalance = 0;
@@ -291,8 +293,9 @@ export default function Home() {
                 <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <p className="mb-2 text-sm font-medium text-[#568170]">Regnskabsår {period}</p>
-                    <h1 className="text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">Dit regnskab, uden støj.</h1>
-                    <p className="mt-2 max-w-xl text-sm leading-6 text-[#68746f]">Indlæs en eller flere CSV-filer, kontrollér posteringerne og få et enkelt overblik.</p>
+                    <h1 className="text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">Forstå bogføring – helt enkelt.</h1>
+                    <p className="mt-3 max-w-2xl text-sm leading-6 text-[#68746f]">Store regnskabssystemer er ofte overkill, når målet er at forstå og lære bogføring. Her kan du følge simple posteringer gennem T-konti, saldobalance og kontokort.</p>
+                    <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-[#3f7561]">Start med den medfølgende eksempelfil med 18 posteringer, eller indlæs dine egne CSV-filer.</p>
                   </div>
                   <button onClick={() => inputRef.current?.click()} className="rounded-xl bg-[#165c46] px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#104d3a] focus:outline-none focus:ring-4 focus:ring-[#bed9cf]">Indlæs CSV-fil</button>
                 </div>
@@ -344,10 +347,42 @@ export default function Home() {
 
             {view === 'taccounts' && (
               <>
-                <PageHeading eyebrow={`${tAccounts.length} konti`} title="T-konti" description="Debet står til venstre, kredit til højre. Bilagsnummeret vises i kantede parenteser før beløbet." />
+                <PageHeading eyebrow={`${tAccounts.length} konti`} title="T-konti" description="Kontiene er opdelt i drift og balance. Debet står til venstre, kredit til højre." />
                 {tAccounts.length ? (
-                  <div className="grid items-start gap-5 xl:grid-cols-2">
-                    {tAccounts.map((account) => <TAccount key={account.number} account={account} />)}
+                  <div className="space-y-10">
+                    {[
+                      {
+                        label: 'Drift',
+                        description: 'Resultatkonti under 10000',
+                        accounts: driftTAccounts,
+                        heading: 'border-[#e8d8b8] bg-[#fff6e5] text-[#7b5a22]',
+                        badge: 'bg-white/70 text-[#7b5a22]',
+                      },
+                      {
+                        label: 'Balance',
+                        description: 'Aktiver og passiver fra 10000',
+                        accounts: balanceTAccounts,
+                        heading: 'border-[#bfdcd0] bg-[#edf6f2] text-[#24664e]',
+                        badge: 'bg-white/70 text-[#24664e]',
+                      },
+                    ].map((section) => (
+                      <section key={section.label}>
+                        <div className={`mb-5 flex items-center justify-between rounded-2xl border px-5 py-4 ${section.heading}`}>
+                          <div>
+                            <h2 className="text-lg font-semibold">{section.label}</h2>
+                            <p className="mt-0.5 text-xs opacity-75">{section.description}</p>
+                          </div>
+                          <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${section.badge}`}>{section.accounts.length} {section.accounts.length === 1 ? 'konto' : 'konti'}</span>
+                        </div>
+                        {section.accounts.length ? (
+                          <div className="grid items-start gap-5 xl:grid-cols-2">
+                            {section.accounts.map((account) => <TAccount key={account.number} account={account} />)}
+                          </div>
+                        ) : (
+                          <p className="rounded-2xl border border-dashed border-[#dfe5e2] bg-white p-6 text-center text-sm text-[#74807b]">Ingen {section.label.toLocaleLowerCase('da-DK')}konti i det indlæste regnskab.</p>
+                        )}
+                      </section>
+                    ))}
                   </div>
                 ) : (
                   <p className="rounded-2xl border border-[#dfe5e2] bg-white p-8 text-center text-sm text-[#74807b]">Indlæs en CSV-fil for at se T-konti.</p>
