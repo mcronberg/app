@@ -1,6 +1,6 @@
 'use client';
 
-import { DragEvent, Fragment, useMemo, useRef, useState } from 'react';
+import { DragEvent, FormEvent, Fragment, useMemo, useRef, useState } from 'react';
 
 type Entry = {
   id: string;
@@ -17,6 +17,8 @@ type Entry = {
 type ValidationIssue = { file: string; line?: number; message: string };
 type ImportedFile = { name: string; rows: number; issues: number };
 type View = 'overview' | 'transactions' | 'taccounts' | 'trialbalance' | 'accountcards' | 'accounts' | 'import';
+type EntryDraft = Pick<Entry, 'date' | 'voucher' | 'account' | 'description' | 'amount'>;
+type EntryEditorState = { mode: 'new' } | { mode: 'edit'; entry: Entry } | null;
 
 const moneyFormatter = new Intl.NumberFormat('da-DK', {
   style: 'currency',
@@ -119,7 +121,8 @@ export default function Home() {
   const [files, setFiles] = useState<ImportedFile[]>([]);
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [showFormat, setShowFormat] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [entryEditor, setEntryEditor] = useState<EntryEditorState>(null);
   const [query, setQuery] = useState('');
 
   const voucherIssues = useMemo<ValidationIssue[]>(() => {
@@ -203,6 +206,11 @@ export default function Home() {
     const needle = query.toLowerCase();
     return !needle || `${entry.date} ${entry.voucher} ${entry.account} ${entry.description} ${entry.amount}`.toLowerCase().includes(needle);
   });
+  const exportedCsv = entries
+    .map((entry) => [entry.date, entry.voucher, entry.account, entry.description, String(entry.amount).replace('.', ',')].join(';'))
+    .join('\r\n');
+  const exportHref = entries.length ? `data:text/csv;charset=utf-8,%EF%BB%BF${encodeURIComponent(`${exportedCsv}\r\n`)}` : undefined;
+  const exportFileName = `regnskab-${new Date().toISOString().slice(0, 10)}.csv`;
 
   async function importFiles(selected: File[]) {
     const csvFiles = selected.filter((file) => file.name.toLowerCase().endsWith('.csv'));
@@ -257,6 +265,34 @@ export default function Home() {
     setView('import');
   }
 
+  function saveEntry(draft: EntryDraft) {
+    const accountNumber = Number(draft.account.match(/^\d+/)?.[0]);
+    if (entryEditor?.mode === 'edit') {
+      const updated = { ...entryEditor.entry, ...draft, accountNumber };
+      setEntries((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      setIssues((current) => current.filter((issue) => issue.file !== updated.file || issue.line !== updated.line));
+    } else {
+      const nextLine = entries.reduce((maximum, entry) => Math.max(maximum, entry.line), 0) + 1;
+      const created: Entry = {
+        ...draft,
+        id: `manual-${Date.now()}`,
+        file: 'redigeret-regnskab.csv',
+        line: nextLine,
+        accountNumber,
+      };
+      setEntries((current) => [...current, created]);
+      if (!files.length) setFiles([{ name: created.file, rows: 1, issues: 0 }]);
+    }
+    setEntryEditor(null);
+    setQuery('');
+    setView('transactions');
+  }
+
+  function deleteEntry(entry: Entry) {
+    if (!window.confirm(`Slet posteringen på bilag ${entry.voucher}?`)) return;
+    setEntries((current) => current.filter((candidate) => candidate.id !== entry.id));
+  }
+
   return (
     <main className="min-h-screen bg-[#f5f7f6] text-[#18201d]">
       <header className="sticky top-0 z-20 border-b border-[#dfe5e2] bg-white/95 backdrop-blur">
@@ -268,7 +304,10 @@ export default function Home() {
               <span className="mt-1 block text-[11px] text-[#68746f]">Enkel bogføring</span>
             </span>
           </button>
-          <button onClick={() => setShowFormat(true)} className="rounded-lg border border-[#d8dfdc] px-3.5 py-2 text-sm font-medium text-[#44504b] transition hover:border-[#afbbb6] hover:bg-[#fafbfa]">Hjælp til format</button>
+          <button onClick={() => setShowHelp(true)} className="flex items-center gap-2 rounded-lg border border-[#d8dfdc] px-3 py-2 text-sm font-medium text-[#44504b] transition hover:border-[#afbbb6] hover:bg-[#fafbfa]" aria-label="Åbn hjælp">
+            <span className="grid h-6 w-6 place-items-center rounded-full bg-[#eaf3ef] font-bold text-[#165c46]">?</span>
+            <span className="hidden sm:inline">Hjælp</span>
+          </button>
         </div>
       </header>
 
@@ -316,7 +355,13 @@ export default function Home() {
 
             {view === 'transactions' && (
               <>
-                <PageHeading eyebrow={`${entries.length} linjer`} title="Posteringer" description="Alle gyldige posteringer på tværs af de indlæste filer." action="Indlæs flere filer" onAction={() => inputRef.current?.click()} />
+                <PageHeading eyebrow={`${entries.length} linjer`} title="Posteringer" description="Rediger, tilføj og slet linjer. Alle rapporter opdateres med det samme." />
+                <div className="mb-4 flex flex-wrap gap-2.5">
+                  <button onClick={() => setEntryEditor({ mode: 'new' })} className="rounded-xl bg-[#165c46] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#104d3a]">+ Tilføj postering</button>
+                  <button onClick={() => inputRef.current?.click()} className="rounded-xl border border-[#8cb4a5] bg-[#edf6f2] px-4 py-2.5 text-sm font-semibold text-[#165c46]">Importér CSV</button>
+                  <a href={exportHref} download={exportFileName} aria-disabled={!entries.length} onClick={(event) => { if (!entries.length) event.preventDefault(); }} className={`rounded-xl border border-[#d8dfdc] bg-white px-4 py-2.5 text-sm font-semibold text-[#5d6863] ${entries.length ? '' : 'cursor-not-allowed opacity-45'}`}>Eksportér CSV</a>
+                </div>
+                <p className="mb-4 rounded-xl border border-[#e8d8b8] bg-[#fffaf0] px-4 py-3 text-xs leading-5 text-[#806f51]">Ændringer findes kun i denne browser, indtil du vælger <strong>Eksportér CSV</strong>. En ny import erstatter det aktuelle regnskab.</p>
                 <div className="mb-4 flex items-center gap-3">
                   <label className="relative flex-1">
                     <span className="sr-only">Søg i posteringer</span>
@@ -324,7 +369,7 @@ export default function Home() {
                   </label>
                   <button onClick={() => setQuery('')} className="rounded-xl border border-[#d8dfdc] bg-white px-4 py-3 text-sm text-[#5d6863]">Ryd</button>
                 </div>
-                <TransactionTable entries={filteredEntries} subtitle={`${filteredEntries.length} vist`} valid={!allIssues.length} />
+                <TransactionTable entries={filteredEntries} subtitle={`${filteredEntries.length} vist`} valid={!allIssues.length} onEdit={(entry) => setEntryEditor({ mode: 'edit', entry })} onDelete={deleteEntry} />
               </>
             )}
 
@@ -519,7 +564,16 @@ export default function Home() {
 
       <input ref={inputRef} type="file" accept=".csv,text/csv" multiple className="hidden" onChange={(event) => { void importFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
 
-      {showFormat && <FormatDialog onClose={() => setShowFormat(false)} />}
+      {entryEditor && (
+        <EntryDialog
+          entry={entryEditor.mode === 'edit' ? entryEditor.entry : undefined}
+          suggestedDate={entries[entries.length - 1]?.date ?? new Date().toISOString().slice(0, 10)}
+          suggestedVoucher={String(entries.reduce((maximum, entry) => Math.max(maximum, Number(entry.voucher)), 0) + 1)}
+          onSave={saveEntry}
+          onClose={() => setEntryEditor(null)}
+        />
+      )}
+      {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
     </main>
   );
 }
@@ -532,8 +586,46 @@ function PageHeading({ eyebrow, title, description, action, onAction }: { eyebro
   return <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="mb-2 text-sm font-medium text-[#568170]">{eyebrow}</p><h1 className="text-3xl font-semibold tracking-[-0.03em]">{title}</h1><p className="mt-2 text-sm leading-6 text-[#68746f]">{description}</p></div>{action && <button onClick={onAction} className="rounded-xl bg-[#165c46] px-5 py-3 text-sm font-semibold text-white">{action}</button>}</div>;
 }
 
-function TransactionTable({ entries, subtitle, valid, onShowAll }: { entries: Entry[]; subtitle: string; valid: boolean; onShowAll?: () => void }) {
-  return <article className="overflow-hidden rounded-2xl border border-[#dfe5e2] bg-white shadow-[0_1px_2px_rgb(20_40_32/3%)]"><div className="flex flex-col gap-3 border-b border-[#e5eae8] p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold">{onShowAll ? 'Seneste posteringer' : 'Alle posteringer'}</h2><p className="mt-1 text-xs text-[#74807b]">{subtitle}</p></div><div className="flex items-center gap-3"><span className={`w-fit rounded-full px-3 py-1.5 text-xs font-semibold ${valid ? 'bg-[#e8f5ef] text-[#196749]' : 'bg-[#fbe9e7] text-[#a34848]'}`}>{valid ? '✓ Regnskabet er gyldigt' : '! Kontrollér importen'}</span>{onShowAll && <button onClick={onShowAll} className="text-xs font-semibold text-[#165c46] hover:underline">Se alle</button>}</div></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-[#fafbfa] text-xs font-medium text-[#74807b]"><tr>{['Dato', 'Bilag', 'Konto', 'Tekst', 'Beløb'].map((heading) => <th key={heading} className={`px-5 py-3 ${heading === 'Beløb' ? 'text-right' : ''}`}>{heading}</th>)}</tr></thead><tbody className="divide-y divide-[#edf0ef]">{entries.map((row) => <tr key={row.id} className="text-[#44504b] transition hover:bg-[#fbfcfb]"><td className="whitespace-nowrap px-5 py-4">{dateLabel(row.date)}</td><td className="px-5 py-4">{row.voucher}</td><td className="px-5 py-4 font-medium text-[#24312c]">{row.account}</td><td className="px-5 py-4">{row.description}</td><td className={`px-5 py-4 text-right font-medium tabular-nums ${row.amount < 0 ? 'text-[#a34848]' : 'text-[#196749]'}`}>{money.format(row.amount)}</td></tr>)}</tbody></table></div>{!entries.length && <p className="p-8 text-center text-sm text-[#74807b]">Ingen posteringer matcher din søgning.</p>}</article>;
+function TransactionTable({ entries, subtitle, valid, onShowAll, onEdit, onDelete }: { entries: Entry[]; subtitle: string; valid: boolean; onShowAll?: () => void; onEdit?: (entry: Entry) => void; onDelete?: (entry: Entry) => void }) {
+  const editable = Boolean(onEdit);
+  const headings = editable ? ['Dato', 'Bilag', 'Konto', 'Tekst', 'Beløb', 'Handling'] : ['Dato', 'Bilag', 'Konto', 'Tekst', 'Beløb'];
+
+  return (
+    <article className="overflow-hidden rounded-2xl border border-[#dfe5e2] bg-white shadow-[0_1px_2px_rgb(20_40_32/3%)]">
+      <div className="flex flex-col gap-3 border-b border-[#e5eae8] p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div><h2 className="font-semibold">{onShowAll ? 'Seneste posteringer' : 'Alle posteringer'}</h2><p className="mt-1 text-xs text-[#74807b]">{subtitle}</p></div>
+        <div className="flex items-center gap-3">
+          <span className={`w-fit rounded-full px-3 py-1.5 text-xs font-semibold ${valid ? 'bg-[#e8f5ef] text-[#196749]' : 'bg-[#fbe9e7] text-[#a34848]'}`}>{valid ? '✓ Regnskabet er gyldigt' : '! Kontrollér importen'}</span>
+          {onShowAll && <button onClick={onShowAll} className="text-xs font-semibold text-[#165c46] hover:underline">Se alle</button>}
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className={`w-full text-left text-sm ${editable ? 'min-w-[900px]' : 'min-w-[720px]'}`}>
+          <thead className="bg-[#fafbfa] text-xs font-medium text-[#74807b]">
+            <tr>{headings.map((heading) => <th key={heading} className={`px-5 py-3 ${heading === 'Beløb' || heading === 'Handling' ? 'text-right' : ''}`}>{heading}</th>)}</tr>
+          </thead>
+          <tbody className="divide-y divide-[#edf0ef]">
+            {entries.map((row) => (
+              <tr key={row.id} className="text-[#44504b] transition hover:bg-[#fbfcfb]">
+                <td className="whitespace-nowrap px-5 py-4">{dateLabel(row.date)}</td>
+                <td className="px-5 py-4">{row.voucher}</td>
+                <td className="px-5 py-4 font-medium text-[#24312c]">{row.account}</td>
+                <td className="px-5 py-4">{row.description}</td>
+                <td className={`whitespace-nowrap px-5 py-4 text-right font-medium tabular-nums ${row.amount < 0 ? 'text-[#a34848]' : 'text-[#196749]'}`}>{money.format(row.amount)}</td>
+                {editable && (
+                  <td className="whitespace-nowrap px-5 py-3 text-right">
+                    <button onClick={() => onEdit?.(row)} className="rounded-lg border border-[#bfdcd0] bg-[#f2faf6] px-3 py-1.5 text-xs font-semibold text-[#196749]" aria-label={`Rediger bilag ${row.voucher}`}>Rediger</button>
+                    <button onClick={() => onDelete?.(row)} className="ml-2 rounded-lg border border-[#efc9c4] bg-[#fffafa] px-3 py-1.5 text-xs font-semibold text-[#a34848]" aria-label={`Slet bilag ${row.voucher}`}>Slet</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!entries.length && <p className="p-8 text-center text-sm text-[#74807b]">Ingen posteringer matcher din søgning.</p>}
+    </article>
+  );
 }
 
 function TAccount({ account }: { account: { number: number; name: string; debit: Entry[]; credit: Entry[] } }) {
@@ -594,6 +686,92 @@ function EmptyImport({ isDragging, setIsDragging, handleDrop, onPick, onLoadTest
   );
 }
 
-function FormatDialog({ onClose }: { onClose: () => void }) {
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-[#111916]/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="format-title" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl sm:p-8"><div className="flex items-start justify-between gap-5"><div><p className="text-sm font-medium text-[#568170]">CSV-format</p><h2 id="format-title" className="mt-1 text-2xl font-semibold tracking-tight">Fem felter. Ét enkelt format.</h2></div><button onClick={onClose} aria-label="Luk" className="grid h-9 w-9 place-items-center rounded-full bg-[#f2f5f3] text-lg text-[#68746f]">×</button></div><p className="mt-4 text-sm leading-6 text-[#68746f]">Hver linje er én postering. Felterne adskilles med semikolon, og der skal ikke være en kolonneoverskrift.</p><div className="mt-5 overflow-x-auto rounded-2xl bg-[#17221e] p-4 font-mono text-xs leading-6 text-[#dcebe5]"><code>2026-01-01;1;1000 Renter;Modtagne renter;-1000<br />2026-01-01;1;10000 Bank;Modtagne renter;1000</code></div><div className="mt-5 grid gap-3 sm:grid-cols-2">{[['Dato', 'YYYY-MM-DD'], ['Bilag', 'Helt tal'], ['Konto', 'Nummer + kontonavn'], ['Beløb', 'Positivt eller negativt tal']].map(([label, value]) => <div key={label} className="rounded-xl border border-[#e3e8e6] p-3"><p className="text-xs font-semibold text-[#26332e]">{label}</p><p className="mt-1 text-xs text-[#74807b]">{value}</p></div>)}</div><p className="mt-5 rounded-xl bg-[#f6f8f7] p-4 text-xs leading-5 text-[#68746f]">Alle linjer med samme bilagsnummer skal tilsammen give 0,00 kr. Decimaler kan skrives med komma eller punktum.</p></div></div>;
+function EntryDialog({ entry, suggestedDate, suggestedVoucher, onSave, onClose }: { entry?: Entry; suggestedDate: string; suggestedVoucher: string; onSave: (draft: EntryDraft) => void; onClose: () => void }) {
+  const [date, setDate] = useState(entry?.date ?? suggestedDate);
+  const [voucher, setVoucher] = useState(entry?.voucher ?? suggestedVoucher);
+  const [account, setAccount] = useState(entry?.account ?? '');
+  const [description, setDescription] = useState(entry?.description ?? '');
+  const [amount, setAmount] = useState(entry ? String(entry.amount).replace('.', ',') : '');
+  const [error, setError] = useState('');
+  const fieldClass = 'mt-1.5 w-full rounded-xl border border-[#d8dfdc] bg-white px-3.5 py-3 text-sm outline-none transition focus:border-[#6b9b88] focus:ring-4 focus:ring-[#dcebe5]';
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedAccount = account.trim().replace(/\s+/g, ' ');
+    const accountMatch = normalizedAccount.match(/^(\d+)\s+(.+)$/);
+    const parsedAmount = parseAmount(amount);
+    if (!isRealDate(date)) return setError('Vælg en gyldig dato.');
+    if (!/^\d+$/.test(voucher.trim())) return setError('Bilag skal være et helt tal.');
+    if (!accountMatch || normalizedAccount.includes(';')) return setError('Konto skal være et nummer efterfulgt af et navn uden semikolon.');
+    if (!description.trim() || description.includes(';')) return setError('Tekst skal udfyldes og må ikke indeholde semikolon.');
+    if (parsedAmount === null) return setError('Beløb skal være et gyldigt tal.');
+
+    onSave({
+      date,
+      voucher: voucher.trim(),
+      account: `${accountMatch[1]} ${accountMatch[2].toLocaleUpperCase('da-DK')}`,
+      description: description.trim(),
+      amount: parsedAmount,
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#111916]/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="entry-title" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+      <form onSubmit={submit} className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
+        <div className="flex items-start justify-between gap-5">
+          <div><p className="text-sm font-medium text-[#568170]">Postering</p><h2 id="entry-title" className="mt-1 text-2xl font-semibold tracking-tight">{entry ? 'Rediger postering' : 'Tilføj postering'}</h2></div>
+          <button type="button" onClick={onClose} aria-label="Luk" className="grid h-9 w-9 place-items-center rounded-full bg-[#f2f5f3] text-lg text-[#68746f]">×</button>
+        </div>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <label className="text-xs font-semibold text-[#44504b]">Dato<input type="date" value={date} onChange={(event) => setDate(event.target.value)} className={fieldClass} /></label>
+          <label className="text-xs font-semibold text-[#44504b]">Bilagsnummer<input inputMode="numeric" value={voucher} onChange={(event) => setVoucher(event.target.value)} className={fieldClass} /></label>
+          <label className="text-xs font-semibold text-[#44504b] sm:col-span-2">Konto<input value={account} onChange={(event) => setAccount(event.target.value)} placeholder="Fx 10000 Bank" className={fieldClass} /></label>
+          <label className="text-xs font-semibold text-[#44504b] sm:col-span-2">Tekst<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Hvad handler posteringen om?" className={fieldClass} /></label>
+          <label className="text-xs font-semibold text-[#44504b] sm:col-span-2">Beløb<input aria-label="Beløb" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Fx 1250 eller -1250" className={fieldClass} /><span className="mt-1.5 block font-normal leading-5 text-[#87918d]">Positivt beløb er debet. Negativt beløb er kredit.</span></label>
+        </div>
+        {error && <p className="mt-4 rounded-xl border border-[#efc9c4] bg-[#fff5f4] px-4 py-3 text-sm text-[#a34848]">{error}</p>}
+        <div className="mt-6 flex justify-end gap-2.5">
+          <button type="button" onClick={onClose} className="rounded-xl border border-[#d8dfdc] px-4 py-2.5 text-sm font-semibold text-[#5d6863]">Annuller</button>
+          <button type="submit" className="rounded-xl bg-[#165c46] px-5 py-2.5 text-sm font-semibold text-white">{entry ? 'Gem ændringer' : 'Tilføj'}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function HelpDialog({ onClose }: { onClose: () => void }) {
+  const features = [
+    ['Overblik', 'Se resultat, balance og de seneste posteringer.'],
+    ['Posteringer', 'Søg, tilføj, rediger eller slet linjer. Ændringer slår straks igennem i alle visninger.'],
+    ['T-konti', 'Se debet til venstre og kredit til højre, opdelt i drift og balance. Bilagsnummeret står i kantede parenteser.'],
+    ['Saldobalance', 'Sammenlign debet, kredit og saldo for drift, aktiver og passiver.'],
+    ['Kontokort', 'Følg alle posteringer og den løbende saldo på hver konto.'],
+    ['Kontoplan', 'Se de konti, som automatisk er fundet i posteringerne.'],
+    ['Import og eksport', 'Indlæs en eller flere CSV-filer. Eksportér efter redigering for at gemme en ny CSV-fil på din computer.'],
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#111916]/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="help-title" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+      <div className="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
+        <div className="flex items-start justify-between gap-5">
+          <div><p className="text-sm font-medium text-[#568170]">Hjælp</p><h2 id="help-title" className="mt-1 text-2xl font-semibold tracking-tight">Sådan bruger du Bogført</h2></div>
+          <button onClick={onClose} aria-label="Luk" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#f2f5f3] text-lg text-[#68746f]">×</button>
+        </div>
+        <p className="mt-4 text-sm leading-6 text-[#68746f]">Start med testfilen, eller importér din egen CSV. Brug derefter visningerne til at undersøge, hvordan hver postering påvirker regnskabet.</p>
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          {features.map(([title, text]) => <article key={title} className="rounded-2xl border border-[#e3e8e6] p-4"><h3 className="text-sm font-semibold text-[#26332e]">{title}</h3><p className="mt-1.5 text-xs leading-5 text-[#74807b]">{text}</p></article>)}
+        </div>
+        <section className="mt-7 border-t border-[#e5eae8] pt-6">
+          <p className="text-sm font-medium text-[#568170]">CSV-format</p>
+          <h3 className="mt-1 text-xl font-semibold">Fem felter adskilt med semikolon</h3>
+          <p className="mt-2 text-sm leading-6 text-[#68746f]">Der skal ikke være en kolonneoverskrift. Kontonavne omdannes automatisk til store bogstaver.</p>
+          <div className="mt-4 overflow-x-auto rounded-2xl bg-[#17221e] p-4 font-mono text-xs leading-6 text-[#dcebe5]"><code>2026-01-01;1;1000 Renter;Modtagne renter;-1000<br />2026-01-01;1;10000 Bank;Modtagne renter;1000</code></div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">{[['Dato', 'YYYY-MM-DD'], ['Bilag', 'Helt tal'], ['Konto', 'Nummer + kontonavn'], ['Beløb', 'Positivt = debet · negativt = kredit']].map(([label, value]) => <div key={label} className="rounded-xl bg-[#f6f8f7] p-3"><p className="text-xs font-semibold text-[#26332e]">{label}</p><p className="mt-1 text-xs text-[#74807b]">{value}</p></div>)}</div>
+        </section>
+        <section className="mt-6 rounded-2xl border border-[#e8d8b8] bg-[#fffaf0] p-4 text-xs leading-5 text-[#806f51]">
+          <strong>Regler:</strong> Konti under 10000 er drift, og konti fra 10000 er balance. Alle linjer med samme bilagsnummer skal tilsammen give 0,00 kr.
+        </section>
+      </div>
+    </div>
+  );
 }
