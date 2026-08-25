@@ -18,11 +18,17 @@ type ValidationIssue = { file: string; line?: number; message: string };
 type ImportedFile = { name: string; rows: number; issues: number };
 type View = 'overview' | 'transactions' | 'taccounts' | 'trialbalance' | 'accountcards' | 'accounts' | 'import';
 
-const money = new Intl.NumberFormat('da-DK', {
+const moneyFormatter = new Intl.NumberFormat('da-DK', {
   style: 'currency',
   currency: 'DKK',
   minimumFractionDigits: 2,
 });
+
+const money = {
+  format(value: number) {
+    return moneyFormatter.format(Math.abs(value) < 0.005 ? 0 : value);
+  },
+};
 
 const nav: { id: View; label: string; icon: string }[] = [
   { id: 'overview', label: 'Overblik', icon: '●' },
