@@ -102,8 +102,8 @@ function parseCsv(name: string, content: string) {
 }
 
 function dateLabel(value: string) {
-  return new Intl.DateTimeFormat('da-DK', { day: 'numeric', month: 'short', year: 'numeric' })
-    .format(new Date(`${value}T00:00:00`));
+  const [year, month, day] = value.split('-');
+  return `${day}-${month}-${year}`;
 }
 
 export default function Home() {
@@ -185,6 +185,8 @@ export default function Home() {
   const driftDebit = driftAccounts.reduce((sum, account) => sum + account.debit, 0);
   const driftCredit = driftAccounts.reduce((sum, account) => sum + account.credit, 0);
   const driftResult = driftCredit - driftDebit;
+  const balanceDebit = balanceAccounts.reduce((sum, account) => sum + account.debit, 0);
+  const balanceCredit = balanceAccounts.reduce((sum, account) => sum + account.credit, 0);
   const assets = balanceAccounts.filter((account) => account.balance > 0).reduce((sum, account) => sum + account.balance, 0);
   const liabilities = balanceAccounts.filter((account) => account.balance < 0).reduce((sum, account) => sum + Math.abs(account.balance), 0);
   const balanceControl = assets - liabilities - driftResult;
@@ -379,8 +381,8 @@ export default function Home() {
                       </thead>
                       <tbody className="divide-y divide-[#edf0ef]">
                         {[
-                          { label: 'Drift', detail: 'Konti under 10000', rows: driftAccounts, color: 'bg-[#fff6e5] text-[#7b5a22]' },
-                          { label: 'Balance', detail: 'Konti fra 10000', rows: balanceAccounts, color: 'bg-[#edf6f2] text-[#24664e]' },
+                          { label: 'Drift', detail: 'Konti under 10000', rows: driftAccounts, debit: driftDebit, credit: driftCredit, color: 'bg-[#fff6e5] text-[#7b5a22]' },
+                          { label: 'Balance', detail: 'Konti fra 10000', rows: balanceAccounts, debit: balanceDebit, credit: balanceCredit, color: 'bg-[#edf6f2] text-[#24664e]' },
                         ].map((section) => (
                           <Fragment key={section.label}>
                             <tr className={section.color}><td colSpan={6} className="px-5 py-2.5 text-xs font-bold uppercase tracking-[0.1em]">{section.label} <span className="ml-2 font-normal normal-case tracking-normal opacity-70">{section.detail}</span></td></tr>
@@ -394,6 +396,12 @@ export default function Home() {
                                 <td className={`px-5 py-4 text-right font-semibold tabular-nums ${account.balance < 0 ? 'text-[#a34848]' : 'text-[#196749]'}`}>{money.format(account.balance)}</td>
                               </tr>
                             ))}
+                            <tr className={`border-t border-[#dfe5e2] font-semibold ${section.color}`}>
+                              <td className="px-5 py-3" colSpan={3}>{section.label} i alt</td>
+                              <td className="px-5 py-3 text-right tabular-nums">{money.format(section.debit)}</td>
+                              <td className="px-5 py-3 text-right tabular-nums">{money.format(section.credit)}</td>
+                              <td className="px-5 py-3 text-right tabular-nums">{money.format(section.debit - section.credit)}</td>
+                            </tr>
                           </Fragment>
                         ))}
                       </tbody>
@@ -422,14 +430,17 @@ export default function Home() {
                           <div className="text-left sm:text-right"><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#87918d]">Slutsaldo</p><p className={`mt-1 font-semibold tabular-nums ${account.closingBalance < 0 ? 'text-[#a34848]' : 'text-[#196749]'}`}>{money.format(account.closingBalance)}</p></div>
                         </div>
                         <div className="overflow-x-auto">
-                          <table className="w-full min-w-[820px] text-left text-sm">
+                          <table className="w-full min-w-[820px] table-fixed text-left text-sm">
+                            <colgroup>
+                              {Array.from({ length: 6 }, (_, index) => <col key={index} className="w-1/6" />)}
+                            </colgroup>
                             <thead className="bg-[#fafbfa] text-xs font-medium text-[#74807b]"><tr><th className="px-5 py-3">Dato</th><th className="px-5 py-3">Bilag</th><th className="px-5 py-3">Tekst</th><th className="px-5 py-3 text-right">Debet</th><th className="px-5 py-3 text-right">Kredit</th><th className="px-5 py-3 text-right">Løbende saldo</th></tr></thead>
                             <tbody className="divide-y divide-[#edf0ef]">
                               {account.postings.map((entry) => (
                                 <tr key={entry.id} className="text-[#44504b]">
                                   <td className="whitespace-nowrap px-5 py-4">{dateLabel(entry.date)}</td>
                                   <td className="px-5 py-4 font-medium text-[#568170]">[{entry.voucher}]</td>
-                                  <td className="px-5 py-4">{entry.description}</td>
+                                  <td className="truncate px-5 py-4" title={entry.description}>{entry.description}</td>
                                   <td className="px-5 py-4 text-right tabular-nums">{entry.amount >= 0 ? money.format(entry.amount) : '—'}</td>
                                   <td className="px-5 py-4 text-right tabular-nums">{entry.amount < 0 ? money.format(Math.abs(entry.amount)) : '—'}</td>
                                   <td className={`px-5 py-4 text-right font-semibold tabular-nums ${entry.runningBalance < 0 ? 'text-[#a34848]' : 'text-[#196749]'}`}>{money.format(entry.runningBalance)}</td>
@@ -499,7 +510,7 @@ function TAccount({ account }: { account: { number: number; name: string; debit:
       </div>
       <div className="mx-5 grid grid-cols-2 border-t-2 border-[#35443e]">
         {columns.map((column, index) => (
-          <div key={column.label} className={`min-w-0 pb-4 pt-3 ${index === 1 ? 'border-l-2 border-[#35443e] pl-4' : 'pr-4'}`}>
+          <div key={column.label} className={`min-w-0 pt-3 ${index === 1 ? 'border-l-2 border-[#35443e] pl-4' : 'pr-4'}`}>
             <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.12em] text-[#87918d]">{column.label}</p>
             <div className="space-y-3">
               {column.entries.map((entry) => (
@@ -513,9 +524,11 @@ function TAccount({ account }: { account: { number: number; name: string; debit:
               ))}
               {!column.entries.length && <p className="py-2 text-center text-xs text-[#b0b7b4]">—</p>}
             </div>
-            <div className="mt-4 flex justify-between gap-2 border-t border-[#dfe5e2] pt-2 text-xs font-semibold tabular-nums">
-              <span>I alt</span><span>{money.format(column.total)}</span>
-            </div>
+          </div>
+        ))}
+        {columns.map((column, index) => (
+          <div key={`${column.label}-total`} className={`mt-4 flex justify-between gap-2 border-t border-[#dfe5e2] pb-4 pt-2 text-xs font-semibold tabular-nums ${index === 1 ? 'border-l-2 border-l-[#35443e] pl-4' : 'pr-4'}`}>
+            <span>I alt</span><span>{money.format(column.total)}</span>
           </div>
         ))}
       </div>
